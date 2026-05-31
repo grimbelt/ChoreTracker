@@ -142,7 +142,15 @@
             </div>
         </div>
     </div>
+<script>
+    window.addChore = function() {
+        alert("The Firebase database script failed to load or was blocked by your browser! Please check your adblocker.");
+    };
+    window.openCompleteModal = window.addChore;
+</script>
 
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { 
