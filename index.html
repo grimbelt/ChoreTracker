@@ -68,9 +68,6 @@
         .btn-complete { background-color: var(--success); padding: 6px 12px; font-size: 14px;}
         .btn-complete:hover { background-color: var(--success-hover); }
 
-        .btn-edit { background-color: var(--warning); padding: 6px 12px; font-size: 14px;}
-        .btn-edit:hover { background-color: var(--warning-hover); }
-
         ul { list-style: none; padding: 0; margin: 0; }
         
         li {
@@ -118,7 +115,7 @@
         <h2>Add a Chore</h2>
         <div class="input-group">
             <input type="text" id="newChoreInput" placeholder="What needs to be done?">
-            <button class="btn-add" onclick="addChore()">Add</button>
+            <button class="btn-add" onclick="window.addChore()">Add</button>
         </div>
     </div>
 
@@ -140,123 +137,82 @@
                 <option value="Lucie">Lucie</option>
             </select>
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button style="background: var(--text-muted);" onclick="closeModal()">Cancel</button>
-                <button class="btn-complete" onclick="confirmCompletion()">Save</button>
+                <button style="background: var(--text-muted);" onclick="window.closeModal()">Cancel</button>
+                <button class="btn-complete" onclick="window.confirmCompletion()">Save</button>
             </div>
         </div>
     </div>
 
-    <script>
-        // Initial setup with some tailored starter tasks if storage is empty
-        const defaultChores = [
-            { id: 1, text: "Clean the litter boxes" },
-            { id: 2, text: "Sterilize baby bottles" },
-            { id: 3, text: "Take out the recycling" }
-        ];
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            onSnapshot, 
+            doc, 
+            deleteDoc 
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        let chores = JSON.parse(localStorage.getItem('activeChores')) || defaultChores;
-        let history = JSON.parse(localStorage.getItem('choreHistory')) || [];
+        // Your specific Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyAZByqG8LQ0MQ4PP2_8SmCFWo1_Pyw0rEk",
+            authDomain: "choretracker-ad195.firebaseapp.com",
+            projectId: "choretracker-ad195",
+            storageBucket: "choretracker-ad195.firebasestorage.app",
+            messagingSenderId: "88683041771",
+            appId: "1:88683041771:web:8a3b95787070cc95b4ffae"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const activeChoresRef = collection(db, "activeChores");
+        const historyRef = collection(db, "choreHistory");
+
         let pendingCompletionId = null;
 
-        function saveState() {
-            localStorage.setItem('activeChores', JSON.stringify(chores));
-            localStorage.setItem('choreHistory', JSON.stringify(history));
-            render();
-        }
+        // Listen for real-time updates to Active Chores
+        onSnapshot(activeChoresRef, (snapshot) => {
+            const chores = [];
+            snapshot.forEach((doc) => {
+                chores.push({ id: doc.id, ...doc.data() });
+            });
+            renderActive(chores);
+        });
 
-        function render() {
+        // Listen for real-time updates to History
+        onSnapshot(historyRef, (snapshot) => {
+            const history = [];
+            snapshot.forEach((doc) => {
+                history.push({ id: doc.id, ...doc.data() });
+            });
+            history.sort((a, b) => b.timestamp - a.timestamp);
+            renderHistory(history);
+        });
+
+        function renderActive(chores) {
             const activeList = document.getElementById('activeChoresList');
-            const historyList = document.getElementById('completedChoresList');
-
-            // Render Active
             activeList.innerHTML = chores.length === 0 ? '<li style="color: var(--text-muted)">All caught up!</li>' : '';
             chores.forEach(chore => {
                 const li = document.createElement('li');
                 li.innerHTML = `
                     <span>${chore.text}</span>
                     <div class="chore-actions">
-                        <button class="btn-edit" onclick="editChore(${chore.id})">Edit</button>
-                        <button class="btn-complete" onclick="openCompleteModal(${chore.id})">Done</button>
+                        <button class="btn-complete" onclick="window.openCompleteModal('${chore.id}', '${chore.text.replace(/'/g, "\\'")}')">Done</button>
                     </div>
                 `;
                 activeList.appendChild(li);
             });
+        }
 
-            // Render History (most recent first)
+        function renderHistory(history) {
+            const historyList = document.getElementById('completedChoresList');
             historyList.innerHTML = history.length === 0 ? '<li style="color: var(--text-muted)">No completed chores yet.</li>' : '';
-            [...history].reverse().forEach(log => {
+            history.forEach(log => {
                 const li = document.createElement('li');
                 li.className = 'history-item';
                 li.innerHTML = `
                     <strong>${log.text}</strong>
-                    <div class="history-meta">Completed by <b>${log.person}</b> on ${log.date}</div>
-                `;
-                historyList.appendChild(li);
-            });
-        }
-
-        function addChore() {
-            const input = document.getElementById('newChoreInput');
-            const text = input.value.trim();
-            if (text) {
-                chores.push({ id: Date.now(), text: text });
-                input.value = '';
-                saveState();
-            }
-        }
-
-        function editChore(id) {
-            const chore = chores.find(c => c.id === id);
-            const newText = prompt("Edit chore:", chore.text);
-            if (newText !== null && newText.trim() !== "") {
-                chore.text = newText.trim();
-                saveState();
-            }
-        }
-
-        function openCompleteModal(id) {
-            pendingCompletionId = id;
-            document.getElementById('completionModal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('completionModal').style.display = 'none';
-            pendingCompletionId = null;
-        }
-
-        function confirmCompletion() {
-            const person = document.getElementById('personSelect').value;
-            const choreIndex = chores.findIndex(c => c.id === pendingCompletionId);
-            
-            if (choreIndex > -1) {
-                const completedChore = chores.splice(choreIndex, 1)[0];
-                
-                // Format the date nicely
-                const now = new Date();
-                const dateString = now.toLocaleDateString() + ' at ' + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
-                history.push({
-                    id: completedChore.id,
-                    text: completedChore.text,
-                    person: person,
-                    date: dateString
-                });
-
-                // Keep history trim (optional: limit to last 50 items)
-                if(history.length > 50) history.shift();
-
-                saveState();
-                closeModal();
-            }
-        }
-
-        // Allow pressing Enter to add a chore
-        document.getElementById('newChoreInput').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') addChore();
-        });
-
-        // Initial render
-        render();
-    </script>
-</body>
-</html>
+                    <div class
