@@ -1,226 +1,531 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chore Tracker</title>
-    <style>
-        :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --success: #10b981;
-            --success-hover: #059669;
-            --warning: #f59e0b;
-            --warning-hover: #d97706;
-            --bg: #f3f4f6;
-            --card-bg: #ffffff;
-            --text-main: #1f2937;
-            --text-muted: #6b7280;
-        }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Our Chores 🏡</title>
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg);
-            color: var(--text-main);
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.5;
-        }
+<!-- Firebase SDKs -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-        h1, h2 { color: var(--text-main); }
-        
-        .card {
-            background: var(--card-bg);
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            margin-bottom: 24px;
-        }
+  const firebaseConfig = {
+    apiKey: "AIzaSyAZByqG8LQ0MQ4PP2_8SmCFWo1_Pyw0rEk",
+    authDomain: "choretracker-ad195.firebaseapp.com",
+    projectId: "choretracker-ad195",
+    storageBucket: "choretracker-ad195.firebasestorage.app",
+    messagingSenderId: "88683041771",
+    appId: "1:88683041771:web:8a3b95787070cc95b4ffae"
+  };
 
-        .input-group {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
 
-        input[type="text"], select {
-            flex-grow: 1;
-            padding: 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 16px;
-        }
+  // ── DOM refs ──────────────────────────────────────────────────
+  const choreList      = document.getElementById("chore-list");
+  const historyList    = document.getElementById("history-list");
+  const addForm        = document.getElementById("add-form");
+  const choreInput     = document.getElementById("chore-input");
+  const modal          = document.getElementById("modal");
+  const modalTitle     = document.getElementById("modal-title");
+  const completeForm   = document.getElementById("complete-form");
+  const whoInput       = document.getElementById("who-input");
+  const editModal      = document.getElementById("edit-modal");
+  const editInput      = document.getElementById("edit-input");
+  const editForm       = document.getElementById("edit-form");
+  const tabChores      = document.getElementById("tab-chores");
+  const tabHistory     = document.getElementById("tab-history");
+  const choresSection  = document.getElementById("chores-section");
+  const historySection = document.getElementById("history-section");
+  const historyEmpty   = document.getElementById("history-empty");
+  const choresEmpty    = document.getElementById("chores-empty");
 
-        button {
-            border: none;
-            padding: 10px 16px;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            color: white;
-        }
+  let pendingCompleteId   = null;
+  let pendingCompleteTitle = null;
+  let pendingEditId       = null;
 
-        .btn-add { background-color: var(--primary); }
-        .btn-add:hover { background-color: var(--primary-hover); }
-        
-        .btn-complete { background-color: var(--success); padding: 6px 12px; font-size: 14px;}
-        .btn-complete:hover { background-color: var(--success-hover); }
+  // ── Tabs ─────────────────────────────────────────────────────
+  tabChores.addEventListener("click", () => {
+    tabChores.classList.add("active");
+    tabHistory.classList.remove("active");
+    choresSection.classList.remove("hidden");
+    historySection.classList.add("hidden");
+  });
+  tabHistory.addEventListener("click", () => {
+    tabHistory.classList.add("active");
+    tabChores.classList.remove("active");
+    historySection.classList.remove("hidden");
+    choresSection.classList.add("hidden");
+    loadHistory();
+  });
 
-        ul { list-style: none; padding: 0; margin: 0; }
-        
-        li {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid #e5e7eb;
-        }
-        
-        li:last-child { border-bottom: none; }
+  // ── Add chore ─────────────────────────────────────────────────
+  addForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = choreInput.value.trim();
+    if (!title) return;
+    const btn = addForm.querySelector("button");
+    btn.disabled = true;
+    await addDoc(collection(db, "chores"), { title, createdAt: serverTimestamp() });
+    choreInput.value = "";
+    btn.disabled = false;
+    loadChores();
+  });
 
-        .chore-actions { display: flex; gap: 8px; }
+  // ── Load chores ───────────────────────────────────────────────
+  async function loadChores() {
+    choreList.innerHTML = `<div class="spinner"></div>`;
+    const q = query(collection(db, "chores"), orderBy("createdAt", "asc"));
+    const snap = await getDocs(q);
+    choreList.innerHTML = "";
+    if (snap.empty) { choresEmpty.classList.remove("hidden"); return; }
+    choresEmpty.classList.add("hidden");
+    snap.forEach(d => {
+      choreList.appendChild(makeChoreCard(d.id, d.data()));
+    });
+  }
 
-        .history-item {
-            flex-direction: column;
-            align-items: flex-start;
-        }
+  function makeChoreCard(id, data) {
+    const card = document.createElement("div");
+    card.className = "card chore-card";
+    card.innerHTML = `
+      <span class="chore-title">${escHtml(data.title)}</span>
+      <div class="card-actions">
+        <button class="btn-icon edit-btn" title="Edit" data-id="${id}" data-title="${escAttr(data.title)}">✏️</button>
+        <button class="btn-icon complete-btn" title="Mark done" data-id="${id}" data-title="${escAttr(data.title)}">✅</button>
+        <button class="btn-icon delete-btn" title="Delete" data-id="${id}">🗑️</button>
+      </div>`;
+    card.querySelector(".complete-btn").addEventListener("click", openCompleteModal);
+    card.querySelector(".edit-btn").addEventListener("click", openEditModal);
+    card.querySelector(".delete-btn").addEventListener("click", async (e) => {
+      if (!confirm("Delete this chore?")) return;
+      await deleteDoc(doc(db, "chores", e.currentTarget.dataset.id));
+      loadChores();
+    });
+    return card;
+  }
 
-        .history-meta {
-            font-size: 0.85em;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
+  // ── Complete modal ────────────────────────────────────────────
+  function openCompleteModal(e) {
+    pendingCompleteId    = e.currentTarget.dataset.id;
+    pendingCompleteTitle = e.currentTarget.dataset.title;
+    modalTitle.textContent = pendingCompleteTitle;
+    whoInput.value = "";
+    modal.classList.remove("hidden");
+    whoInput.focus();
+  }
+  document.getElementById("modal-cancel").addEventListener("click", () => modal.classList.add("hidden"));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hidden"); });
 
-        /* Modal Styles */
-        #completionModal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5);
-            align-items: center; justify-content: center;
-        }
-        .modal-content {
-            background: white; padding: 20px; border-radius: 12px; width: 90%; max-width: 300px;
-        }
-        .modal-content h3 { margin-top: 0; }
-    </style>
+  completeForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const who = whoInput.value.trim();
+    if (!who) return;
+    const btn = completeForm.querySelector("button[type=submit]");
+    btn.disabled = true;
+    await addDoc(collection(db, "history"), {
+      title: pendingCompleteTitle,
+      who,
+      completedAt: serverTimestamp()
+    });
+    await deleteDoc(doc(db, "chores", pendingCompleteId));
+    modal.classList.add("hidden");
+    btn.disabled = false;
+    loadChores();
+  });
+
+  // ── Edit modal ────────────────────────────────────────────────
+  function openEditModal(e) {
+    pendingEditId       = e.currentTarget.dataset.id;
+    editInput.value     = e.currentTarget.dataset.title;
+    editModal.classList.remove("hidden");
+    editInput.focus();
+  }
+  document.getElementById("edit-cancel").addEventListener("click", () => editModal.classList.add("hidden"));
+  editModal.addEventListener("click", (e) => { if (e.target === editModal) editModal.classList.add("hidden"); });
+
+  editForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = editInput.value.trim();
+    if (!title) return;
+    const btn = editForm.querySelector("button[type=submit]");
+    btn.disabled = true;
+    await updateDoc(doc(db, "chores", pendingEditId), { title });
+    editModal.classList.add("hidden");
+    btn.disabled = false;
+    loadChores();
+  });
+
+  // ── History ───────────────────────────────────────────────────
+  async function loadHistory() {
+    historyList.innerHTML = `<div class="spinner"></div>`;
+    const q = query(collection(db, "history"), orderBy("completedAt", "desc"));
+    const snap = await getDocs(q);
+    historyList.innerHTML = "";
+    if (snap.empty) { historyEmpty.classList.remove("hidden"); return; }
+    historyEmpty.classList.add("hidden");
+    snap.forEach(d => historyList.appendChild(makeHistoryCard(d.data())));
+  }
+
+  function makeHistoryCard(data) {
+    const card = document.createElement("div");
+    card.className = "card history-card";
+    const date = data.completedAt?.toDate
+      ? data.completedAt.toDate().toLocaleDateString("en-CA", { year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" })
+      : "—";
+    card.innerHTML = `
+      <div class="history-info">
+        <span class="chore-title">${escHtml(data.title)}</span>
+        <span class="history-meta">by <strong>${escHtml(data.who)}</strong> · ${date}</span>
+      </div>
+      <span class="done-badge">Done ✓</span>`;
+    return card;
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function escAttr(s) { return String(s).replace(/"/g,"&quot;"); }
+
+  // ── Boot ──────────────────────────────────────────────────────
+  loadChores();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --cream:   #fdf6ec;
+    --warm:    #f5e8d3;
+    --tan:     #e8d4b8;
+    --brown:   #7a5c3a;
+    --dark:    #3d2b1a;
+    --accent:  #c95c2e;
+    --green:   #4a7c59;
+    --shadow:  0 2px 12px rgba(90,50,20,.10);
+    --radius:  14px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: "Nunito", sans-serif;
+    background: var(--cream);
+    color: var(--dark);
+    min-height: 100vh;
+    padding: 0 0 60px;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--brown);
+    color: var(--cream);
+    padding: 28px 24px 20px;
+    text-align: center;
+    box-shadow: 0 3px 16px rgba(0,0,0,.18);
+  }
+  header h1 {
+    font-family: "Lora", serif;
+    font-size: clamp(1.6rem, 5vw, 2.4rem);
+    font-weight: 600;
+    letter-spacing: .01em;
+  }
+  header p { font-size: .9rem; opacity: .75; margin-top: 4px; }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex;
+    background: var(--warm);
+    border-bottom: 2px solid var(--tan);
+  }
+  .tabs button {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    background: transparent;
+    font-family: "Nunito", sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--brown);
+    cursor: pointer;
+    transition: background .2s, color .2s;
+    letter-spacing: .02em;
+  }
+  .tabs button.active {
+    background: var(--cream);
+    color: var(--accent);
+    border-bottom: 3px solid var(--accent);
+    margin-bottom: -2px;
+  }
+  .tabs button:not(.active):hover { background: var(--tan); }
+
+  /* ── Main ── */
+  main { max-width: 600px; margin: 0 auto; padding: 24px 16px; }
+
+  /* ── Add form ── */
+  .add-form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+    background: white;
+    border: 2px solid var(--tan);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+  }
+  .add-form input {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-family: "Nunito", sans-serif;
+    font-size: 1rem;
+    color: var(--dark);
+    background: transparent;
+  }
+  .add-form input::placeholder { color: #bba98a; }
+  .btn-add {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 9px;
+    padding: 8px 18px;
+    font-family: "Nunito", sans-serif;
+    font-weight: 700;
+    font-size: .95rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  .btn-add:hover  { background: #b04d24; }
+  .btn-add:active { transform: scale(.97); }
+  .btn-add:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ── Cards ── */
+  .card {
+    background: white;
+    border: 1.5px solid var(--tan);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    animation: fadeUp .25s ease both;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .chore-title {
+    font-family: "Lora", serif;
+    font-size: 1.05rem;
+    color: var(--dark);
+    flex: 1;
+  }
+  .card-actions { display: flex; gap: 6px; }
+  .btn-icon {
+    background: var(--warm);
+    border: 1.5px solid var(--tan);
+    border-radius: 8px;
+    width: 36px; height: 36px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn-icon:hover  { background: var(--tan); }
+  .btn-icon:active { transform: scale(.93); }
+
+  /* ── History card ── */
+  .history-card { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .history-info { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+  .history-meta { font-size: .82rem; color: #9b7d5a; }
+  .done-badge {
+    font-size: .78rem; font-weight: 700;
+    background: #d4edda; color: var(--green);
+    border: 1px solid #a8d5b5;
+    border-radius: 20px;
+    padding: 3px 10px;
+    align-self: flex-end;
+    margin-top: -24px;
+  }
+
+  /* ── Empty states ── */
+  .empty {
+    text-align: center;
+    padding: 48px 16px;
+    color: #bba98a;
+    font-family: "Lora", serif;
+    font-style: italic;
+    font-size: 1rem;
+  }
+  .empty span { font-size: 2rem; display: block; margin-bottom: 10px; }
+
+  /* ── Spinner ── */
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--tan);
+    border-top-color: var(--brown);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    margin: 40px auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Modals ── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(40,20,5,.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+    padding: 16px;
+    animation: fadeIn .18s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal-box {
+    background: var(--cream);
+    border-radius: 20px;
+    padding: 28px 24px;
+    width: 100%; max-width: 380px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.22);
+    animation: popIn .2s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes popIn {
+    from { transform: scale(.92); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+  .modal-box h2 {
+    font-family: "Lora", serif;
+    font-size: 1.2rem;
+    color: var(--dark);
+    margin-bottom: 6px;
+  }
+  .modal-box p { font-size: .88rem; color: #9b7d5a; margin-bottom: 18px; }
+  .modal-input {
+    width: 100%;
+    padding: 11px 14px;
+    border: 2px solid var(--tan);
+    border-radius: 10px;
+    font-family: "Nunito", sans-serif;
+    font-size: 1rem;
+    color: var(--dark);
+    background: white;
+    outline: none;
+    margin-bottom: 16px;
+    transition: border-color .15s;
+  }
+  .modal-input:focus { border-color: var(--brown); }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .btn-cancel {
+    padding: 9px 18px;
+    border: 1.5px solid var(--tan);
+    border-radius: 9px;
+    background: white;
+    font-family: "Nunito", sans-serif;
+    font-weight: 600;
+    font-size: .95rem;
+    color: var(--brown);
+    cursor: pointer;
+  }
+  .btn-cancel:hover { background: var(--warm); }
+  .btn-confirm {
+    padding: 9px 20px;
+    border: none;
+    border-radius: 9px;
+    background: var(--green);
+    color: white;
+    font-family: "Nunito", sans-serif;
+    font-weight: 700;
+    font-size: .95rem;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-confirm:hover    { background: #3a6347; }
+  .btn-confirm:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-confirm-edit { background: var(--brown); }
+  .btn-confirm-edit:hover { background: #5e4128; }
+
+  .hidden { display: none !important; }
+
+  section h2 {
+    font-family: "Lora", serif;
+    font-size: 1.1rem;
+    color: var(--brown);
+    margin-bottom: 16px;
+    letter-spacing: .03em;
+  }
+</style>
 </head>
 <body>
 
-    <h1>Home Operations</h1>
+<header>
+  <h1>🏡 Our Chores</h1>
+  <p>A little home, a little teamwork</p>
+</header>
 
-    <div class="card">
-        <h2>Add a Chore</h2>
-        <div class="input-group">
-            <input type="text" id="newChoreInput" placeholder="What needs to be done?">
-            <button class="btn-add" onclick="window.addChore()">Add</button>
-        </div>
+<div class="tabs">
+  <button id="tab-chores" class="active">📋 To-Do</button>
+  <button id="tab-history">✅ History</button>
+</div>
+
+<main>
+
+  <!-- Chores section -->
+  <section id="chores-section">
+    <form id="add-form" class="add-form">
+      <input id="chore-input" type="text" placeholder="Add a new chore…" autocomplete="off" required />
+      <button type="submit" class="btn-add">+ Add</button>
+    </form>
+    <div id="chore-list"></div>
+    <div id="chores-empty" class="empty hidden">
+      <span>🌿</span>
+      All done! No chores left — enjoy your day ♡
     </div>
+  </section>
 
-    <div class="card">
-        <h2>Active Backlog</h2>
-        <ul id="activeChoresList"></ul>
+  <!-- History section -->
+  <section id="history-section" class="hidden">
+    <div id="history-list"></div>
+    <div id="history-empty" class="empty hidden">
+      <span>📖</span>
+      No completed chores yet.<br>Get to it! 😄
     </div>
+  </section>
 
-    <div class="card">
-        <h2>Completed Log</h2>
-        <ul id="completedChoresList"></ul>
-    </div>
+</main>
 
-    <div id="completionModal">
-        <div class="modal-content">
-            <h3>Who did this?</h3>
-            <select id="personSelect" style="width: 100%; margin-bottom: 15px;">
-                <option value="Mathieu">Mathieu</option>
-                <option value="Lucie">Lucie</option>
-            </select>
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button style="background: var(--text-muted);" onclick="window.closeModal()">Cancel</button>
-                <button class="btn-complete" onclick="window.confirmCompletion()">Save</button>
-            </div>
-        </div>
-    </div>
-<script>
-    window.addChore = function() {
-        alert("The Firebase database script failed to load or was blocked by your browser! Please check your adblocker.");
-    };
-    window.openCompleteModal = window.addChore;
-</script>
+<!-- Complete modal -->
+<div id="modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>Mark as done ✅</h2>
+    <p id="modal-title" style="font-family:Lora,serif;font-style:italic;font-size:1rem;color:#3d2b1a;margin-bottom:4px;"></p>
+    <p>Who did this chore?</p>
+    <form id="complete-form">
+      <input id="who-input" class="modal-input" type="text" placeholder="Your name…" autocomplete="off" required />
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel" class="btn-cancel">Cancel</button>
+        <button type="submit" class="btn-confirm">Mark done</button>
+      </div>
+    </form>
+  </div>
+</div>
 
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { 
-            getFirestore, 
-            collection, 
-            addDoc, 
-            onSnapshot, 
-            doc, 
-            deleteDoc 
-        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+<!-- Edit modal -->
+<div id="edit-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>Edit chore ✏️</h2>
+    <form id="edit-form">
+      <input id="edit-input" class="modal-input" type="text" autocomplete="off" required />
+      <div class="modal-actions">
+        <button type="button" id="edit-cancel" class="btn-cancel">Cancel</button>
+        <button type="submit" class="btn-confirm btn-confirm-edit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
 
-        
-		const firebaseConfig = {
-			apiKey: "AIzaSyAZByqG8LQ0MQ4PP2_8SmCFWo1_Pyw0rEk",
-			authDomain: "choretracker-ad195.firebaseapp.com",
-			projectId: "choretracker-ad195",
-			storageBucket: "choretracker-ad195.firebasestorage.app",
-			messagingSenderId: "88683041771",
-			appId: "1:88683041771:web:8a3b95787070cc95b4ffae"
-		};
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        const activeChoresRef = collection(db, "activeChores");
-        const historyRef = collection(db, "choreHistory");
-
-        let pendingCompletionId = null;
-
-        // Listen for real-time updates to Active Chores
-        onSnapshot(activeChoresRef, (snapshot) => {
-            const chores = [];
-            snapshot.forEach((doc) => {
-                chores.push({ id: doc.id, ...doc.data() });
-            });
-            renderActive(chores);
-        });
-
-        // Listen for real-time updates to History
-        onSnapshot(historyRef, (snapshot) => {
-            const history = [];
-            snapshot.forEach((doc) => {
-                history.push({ id: doc.id, ...doc.data() });
-            });
-            history.sort((a, b) => b.timestamp - a.timestamp);
-            renderHistory(history);
-        });
-
-        function renderActive(chores) {
-            const activeList = document.getElementById('activeChoresList');
-            activeList.innerHTML = chores.length === 0 ? '<li style="color: var(--text-muted)">All caught up!</li>' : '';
-            chores.forEach(chore => {
-                const li = document.createElement('li');
-                li.innerHTML = `
-                    <span>${chore.text}</span>
-                    <div class="chore-actions">
-                        <button class="btn-complete" onclick="window.openCompleteModal('${chore.id}', '${chore.text.replace(/'/g, "\\'")}')">Done</button>
-                    </div>
-                `;
-                activeList.appendChild(li);
-            });
-        }
-
-        function renderHistory(history) {
-            const historyList = document.getElementById('completedChoresList');
-            historyList.innerHTML = history.length === 0 ? '<li style="color: var(--text-muted)">No completed chores yet.</li>' : '';
-            history.forEach(log => {
-                const li = document.createElement('li');
-                li.className = 'history-item';
-                li.innerHTML = `
-                    <strong>${log.text}</strong>
-                    <div class
+</body>
+</html>
